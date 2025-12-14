@@ -70,7 +70,7 @@ public class SantaVideoGenerator
             Console.WriteLine($"📸 Loading image: {Path.GetFileName(imagePath)}");
             
             var imageBytes = await File.ReadAllBytesAsync(imagePath);
-            var base64Image = Convert.ToBase64String(imageBytes);
+            var fileName = Path.GetFileName(imagePath);
             var imageExtension = Path.GetExtension(imagePath).TrimStart('.').ToLower();
             var mimeType = imageExtension switch
             {
@@ -85,27 +85,50 @@ public class SantaVideoGenerator
             Console.WriteLine("           to the Christmas tree, places beautifully wrapped gifts underneath,");
             Console.WriteLine("           steps back to admire the scene, then disappears in a festive sparkle.\n");
 
-            var requestBody = new
-            {
-                prompt = "Santa Claus magically appears in the Christmas scene, walks gracefully to the Christmas tree with a bag of presents, carefully places beautifully wrapped gifts underneath the tree, steps back to admire his work with a warm smile, waves goodbye, and disappears in a shower of festive sparkles and twinkling lights. The scene is warm, magical, and filled with holiday spirit.",
-                image = new
-                {
-                    data = base64Image,
-                    mimeType = mimeType
-                },
-                duration = 10,
-                aspectRatio = "16:9",
-                quality = "high",
-                includeAudio = true
-            };
+            var prompt = "Santa Claus magically appears in the Christmas scene, walks gracefully to the Christmas tree with a bag of presents, carefully places beautifully wrapped gifts underneath the tree, steps back to admire his work with a warm smile, waves goodbye, and disappears in a shower of festive sparkles and twinkling lights. The scene is warm, magical, and filled with holiday spirit.";
 
-            var jsonContent = JsonSerializer.Serialize(requestBody);
-            var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-
-            var apiUrl = _endpoint;
+            // Build multipart/form-data request matching Python code exactly
+            using var formData = new MultipartFormDataContent();
             
-            Console.WriteLine("⏳ Sending request to Azure AI Foundry Sora... {0}", apiUrl);
-            var response = await _httpClient.PostAsync(apiUrl, content);
+            // Add all form fields as strings (matching Python data dict)
+            formData.Add(new StringContent(prompt), "prompt");
+            formData.Add(new StringContent("720"), "height");
+            formData.Add(new StringContent("1280"), "width");
+            formData.Add(new StringContent("10"), "n_seconds");
+            formData.Add(new StringContent("1"), "n_variants");
+            formData.Add(new StringContent(_deploymentName), "model");
+            
+            // Add inpaint_items as JSON string (for image-to-video)
+            var inpaintItems = new[]
+            {
+                new
+                {
+                    frame_index = 0,
+                    type = "image",
+                    file_name = fileName,
+                    crop_bounds = new
+                    {
+                        left_fraction = 0.0,
+                        top_fraction = 0.0,
+                        right_fraction = 1.0,
+                        bottom_fraction = 1.0
+                    }
+                }
+            };
+            formData.Add(new StringContent(JsonSerializer.Serialize(inpaintItems)), "inpaint_items");
+            
+            // Add image file (matching Python files format)
+            var imageContent = new ByteArrayContent(imageBytes);
+            imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mimeType);
+            formData.Add(imageContent, "files", fileName);
+
+            // Construct proper Sora API URL (matching Python)
+            var apiUrl = $"{_endpoint.TrimEnd('/')}/openai/v1/video/generations/jobs?api-version=preview";
+            
+            Console.WriteLine("⏳ Sending request to Azure AI Foundry Sora...");
+            Console.WriteLine($"   Endpoint: {apiUrl}");
+            
+            var response = await _httpClient.PostAsync(apiUrl, formData);
             
             if (!response.IsSuccessStatusCode)
             {
@@ -116,16 +139,19 @@ public class SantaVideoGenerator
             }
 
             var responseJson = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"Full response JSON: {responseJson}");
+            
             var result = JsonSerializer.Deserialize<JsonElement>(responseJson);
 
-            if (result.TryGetProperty("id", out var operationId))
+            if (result.TryGetProperty("id", out var jobId))
             {
-                Console.WriteLine($"✓ Video generation started! Operation ID: {operationId.GetString()}");
-                await PollVideoGenerationStatus(operationId.GetString()!);
+                Console.WriteLine($"✓ Job created: {jobId.GetString()}");
+                await PollJobStatus(jobId.GetString()!);
             }
-            else if (result.TryGetProperty("videoUrl", out var videoUrl))
+            else
             {
-                await DownloadVideo(videoUrl.GetString()!);
+                Console.WriteLine($"⚠ Unexpected response format. Full response:");
+                Console.WriteLine(responseJson);
             }
         }
         catch (Exception ex)
@@ -135,49 +161,57 @@ public class SantaVideoGenerator
         }
     }
 
-    private async Task PollVideoGenerationStatus(string operationId)
+    private async Task PollJobStatus(string jobId)
     {
-        var statusUrl = $"{_endpoint.TrimEnd('/')}/openai/operations/{operationId}?api-version=2024-08-01-preview";
-        var maxAttempts = 60;
+        var statusUrl = $"{_endpoint.TrimEnd('/')}/openai/v1/video/generations/jobs/{jobId}?api-version=preview";
+        var maxAttempts = 120; // 10 minutes max
         var attempt = 0;
+        string? status = null;
 
         Console.WriteLine("\n⏳ Generating video (this may take a few minutes)...");
 
-        while (attempt < maxAttempts)
+        while (status != "succeeded" && status != "failed" && status != "cancelled" && attempt < maxAttempts)
         {
             await Task.Delay(5000);
             attempt++;
 
             var response = await _httpClient.GetAsync(statusUrl);
             var responseJson = await response.Content.ReadAsStringAsync();
-            var status = JsonSerializer.Deserialize<JsonElement>(responseJson);
+            var statusResponse = JsonSerializer.Deserialize<JsonElement>(responseJson);
 
-            if (status.TryGetProperty("status", out var statusValue))
+            if (statusResponse.TryGetProperty("status", out var statusValue))
             {
-                var statusText = statusValue.GetString();
+                status = statusValue.GetString();
+                Console.Write($"\r   Job status: {status} ({attempt * 5}s elapsed)");
                 
-                if (statusText == "succeeded")
+                if (status == "succeeded")
                 {
-                    if (status.TryGetProperty("result", out var result) && 
-                        result.TryGetProperty("videoUrl", out var videoUrl))
+                    Console.WriteLine("\n✓ Video generation completed!");
+                    
+                    // Retrieve generated video
+                    if (statusResponse.TryGetProperty("generations", out var generations) && 
+                        generations.GetArrayLength() > 0)
                     {
-                        Console.WriteLine("\n✓ Video generation completed!");
-                        await DownloadVideo(videoUrl.GetString()!);
-                        return;
+                        var firstGeneration = generations[0];
+                        if (firstGeneration.TryGetProperty("id", out var generationId))
+                        {
+                            await DownloadGeneratedVideo(generationId.GetString()!);
+                        }
                     }
+                    else
+                    {
+                        Console.WriteLine("❌ No generations found in job result.");
+                    }
+                    return;
                 }
-                else if (statusText == "failed")
+                else if (status == "failed" || status == "cancelled")
                 {
-                    Console.WriteLine($"\n❌ Video generation failed.");
-                    if (status.TryGetProperty("error", out var error))
+                    Console.WriteLine($"\n❌ Job {status}.");
+                    if (statusResponse.TryGetProperty("error", out var error))
                     {
                         Console.WriteLine($"Error: {error}");
                     }
                     return;
-                }
-                else
-                {
-                    Console.Write($"\r   Progress: {statusText} ({attempt * 5}s elapsed)");
                 }
             }
         }
@@ -185,11 +219,13 @@ public class SantaVideoGenerator
         Console.WriteLine("\n⏰ Timeout waiting for video generation.");
     }
 
-    private async Task DownloadVideo(string videoUrl)
+    private async Task DownloadGeneratedVideo(string generationId)
     {
         try
         {
-            Console.WriteLine($"\n📥 Downloading video from: {videoUrl}");
+            var videoUrl = $"{_endpoint.TrimEnd('/')}/openai/v1/video/generations/{generationId}/content/video?api-version=preview";
+            
+            Console.WriteLine($"\n📥 Downloading video from generation: {generationId}");
             
             var videoBytes = await _httpClient.GetByteArrayAsync(videoUrl);
             var outputPath = Path.Combine(Directory.GetCurrentDirectory(), $"santa_video_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
@@ -206,3 +242,4 @@ public class SantaVideoGenerator
         }
     }
 }
+
