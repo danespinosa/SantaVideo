@@ -1,6 +1,8 @@
 # Azure AI Foundry Sora Model Provisioning Script
 # This script creates an Azure OpenAI resource and deploys the Sora video generation model
 
+#Requires -Version 7.0
+
 param(
     [Parameter(Mandatory=$false)]
     [string]$ResourceGroupName = "rg-santa-video",
@@ -15,9 +17,32 @@ param(
     [string]$DeploymentName = "sora-deployment"
 )
 
+# Check PowerShell version (belt and suspenders approach)
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host "================================" -ForegroundColor Red
+    Write-Host "ERROR: PowerShell 7+ Required" -ForegroundColor Red
+    Write-Host "================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Current Version: PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
+    Write-Host "Required Version: PowerShell 7.0 or higher" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Please install PowerShell 7+ and run this script again." -ForegroundColor White
+    Write-Host ""
+    Write-Host "Download PowerShell 7+:" -ForegroundColor Cyan
+    Write-Host "  Windows: https://aka.ms/install-powershell-windows" -ForegroundColor White
+    Write-Host "  Or use:  winget install Microsoft.PowerShell" -ForegroundColor White
+    Write-Host ""
+    Write-Host "After installing, run this script with:" -ForegroundColor Cyan
+    Write-Host "  pwsh .\provision-sora-model.ps1" -ForegroundColor White
+    Write-Host ""
+    exit 1
+}
+
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host "Azure AI Foundry Sora Model Setup" -ForegroundColor Cyan
 Write-Host "================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "✓ PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor Green
 Write-Host ""
 
 # Check if Azure CLI is installed
@@ -83,21 +108,24 @@ $deploymentExists = az cognitiveservices account deployment show `
     --deployment-name $DeploymentName 2>$null
 
 if (-not $deploymentExists) {
-    # Deploy Sora model (use sora-1 or sora-2 based on availability)
-    try {
-        az cognitiveservices account deployment create `
-            --name $OpenAIName `
-            --resource-group $ResourceGroupName `
-            --deployment-name $DeploymentName `
-            --model-name "sora-2" `
-            --model-version "1" `
-            --model-format OpenAI `
-            --sku-capacity 1 `
-            --sku-name "Standard" `
-            --output none
-        Write-Host "✓ Sora model deployment created" -ForegroundColor Green
-    } catch {
-        Write-Host "Failed to deploy Sora-2. Trying Sora-1..." -ForegroundColor Yellow
+    # Try Sora-2 first
+    Write-Host "Attempting to deploy Sora-2 model..." -ForegroundColor Yellow
+    az cognitiveservices account deployment create `
+        --name $OpenAIName `
+        --resource-group $ResourceGroupName `
+        --deployment-name $DeploymentName `
+        --model-name "sora-2" `
+        --model-version "1" `
+        --model-format OpenAI `
+        --sku-capacity 1 `
+        --sku-name "Standard" `
+        --output none 2>$null
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✓ Sora-2 model deployment created successfully" -ForegroundColor Green
+    } else {
+        # Sora-2 failed, try Sora-1
+        Write-Host "⚠ Sora-2 not available. Trying Sora-1..." -ForegroundColor Yellow
         az cognitiveservices account deployment create `
             --name $OpenAIName `
             --resource-group $ResourceGroupName `
@@ -107,8 +135,38 @@ if (-not $deploymentExists) {
             --model-format OpenAI `
             --sku-capacity 1 `
             --sku-name "Standard" `
-            --output none
-        Write-Host "✓ Sora-1 model deployment created" -ForegroundColor Green
+            --output none 2>$null
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ Sora-1 model deployment created successfully" -ForegroundColor Green
+        } else {
+            # Both failed, try just "sora"
+            Write-Host "⚠ Sora-1 not available. Trying generic 'sora' model..." -ForegroundColor Yellow
+            az cognitiveservices account deployment create `
+                --name $OpenAIName `
+                --resource-group $ResourceGroupName `
+                --deployment-name $DeploymentName `
+                --model-name "sora" `
+                --model-version "1" `
+                --model-format OpenAI `
+                --sku-capacity 1 `
+                --sku-name "Standard" `
+                --output none
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✓ Sora model deployment created successfully" -ForegroundColor Green
+            } else {
+                Write-Host "❌ Failed to deploy Sora model. Please check:" -ForegroundColor Red
+                Write-Host "   1. Your subscription has access to Sora preview" -ForegroundColor Yellow
+                Write-Host "   2. The region '$Location' supports Sora models" -ForegroundColor Yellow
+                Write-Host "   3. Your Azure OpenAI quota is sufficient" -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "Try running with a different region:" -ForegroundColor Cyan
+                Write-Host "   .\provision-sora-model.ps1 -Location 'eastus2'" -ForegroundColor White
+                Write-Host ""
+                exit 1
+            }
+        }
     }
 } else {
     Write-Host "✓ Model deployment already exists" -ForegroundColor Green
