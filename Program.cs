@@ -1,4 +1,4 @@
-﻿using Azure;
+using Azure;
 using Azure.AI.OpenAI;
 using Microsoft.Extensions.Configuration;
 using System.Text.Json;
@@ -87,7 +87,7 @@ public class SantaVideoGenerator
 
             var requestBody = new
             {
-                prompt = "Santa Claus magically appears in the Christmas scene, walks gracefully to the Christmas tree with a bag of presents, carefully places beautifully wrapped gifts underneath the tree, steps back to admire his work with a warm smile, waves goodbye, and disappears in a shower of festive sparkles and twinkling lights. The scene is warm, magical, and filled with holiday spirit.",
+                prompt = "Ultra realistic cinematic video of a cozy living room on Christmas Eve, warmly lit by the glow of a decorated Christmas tree and a crackling fireplace, soft bokeh Christmas lights in the background. A full‑body shot of Santa Claus in a classic red and white suit with a fluffy white beard and round belly, holding a large red velvet bag of presents, appears magically in a subtle burst of golden sparkles near the tree. He walks slowly and gracefully toward the Christmas tree, kneels down and carefully places several beautifully wrapped gifts with shiny ribbons underneath the tree, then stands up, steps back and admires the scene with a warm, gentle smile. Finally, Santa looks toward the camera, raises his hand and waves goodbye, then disappears in a shower of festive sparkling particles and twinkling lights that gently fade out. Shot at eye level with a soft, slow camera dolly in, shallow depth of field, warm color grading, high dynamic range, highly detailed textures, photorealistic lighting, no text, no watermarks."
                 image = new
                 {
                     data = base64Image,
