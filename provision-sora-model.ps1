@@ -101,6 +101,7 @@ Write-Host ""
 # Deploy Sora model
 Write-Host "Deploying Sora video generation model: $DeploymentName..." -ForegroundColor Yellow
 Write-Host "Note: Sora model requires preview access. Ensure your subscription is approved." -ForegroundColor Cyan
+Write-Host ""
 
 $deploymentExists = az cognitiveservices account deployment show `
     --name $OpenAIName `
@@ -108,64 +109,131 @@ $deploymentExists = az cognitiveservices account deployment show `
     --deployment-name $DeploymentName 2>$null
 
 if (-not $deploymentExists) {
-    # Try Sora-2 first
-    Write-Host "Attempting to deploy Sora-2 model..." -ForegroundColor Yellow
-    az cognitiveservices account deployment create `
+    # First, list available models to find the correct Sora model version
+    Write-Host "Checking available Sora models in your region..." -ForegroundColor Yellow
+    $modelsJson = az cognitiveservices account list-models `
         --name $OpenAIName `
         --resource-group $ResourceGroupName `
-        --deployment-name $DeploymentName `
-        --model-name "sora-2" `
-        --model-version "1" `
-        --model-format OpenAI `
-        --sku-capacity 1 `
-        --sku-name "Standard" `
-        --output none 2>$null
+        --output json 2>$null
     
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "✓ Sora-2 model deployment created successfully" -ForegroundColor Green
+    if ($modelsJson) {
+        $models = $modelsJson | ConvertFrom-Json
+        $soraModels = $models | Where-Object { $_.name -like "*sora*" }
+        
+        if ($soraModels) {
+            Write-Host "✓ Found Sora model(s) available:" -ForegroundColor Green
+            $soraModels | ForEach-Object { Write-Host "  - $($_.name) (version: $($_.version))" -ForegroundColor White }
+            Write-Host ""
+            
+            # Try to deploy the first available Sora model
+            $firstSora = $soraModels | Select-Object -First 1
+            $modelName = $firstSora.name
+            $modelVersion = $firstSora.version
+            
+            Write-Host "Deploying $modelName (version: $modelVersion)..." -ForegroundColor Yellow
+            az cognitiveservices account deployment create `
+                --name $OpenAIName `
+                --resource-group $ResourceGroupName `
+                --deployment-name $DeploymentName `
+                --model-name $modelName `
+                --model-version $modelVersion `
+                --model-format OpenAI `
+                --sku-capacity 1 `
+                --sku-name "Standard" `
+                --output none 2>$null
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✓ Sora model deployment created successfully" -ForegroundColor Green
+            } else {
+                Write-Host "⚠ Failed to deploy $modelName. Trying manual fallback..." -ForegroundColor Yellow
+                
+                # Fallback: Try without specifying version
+                az cognitiveservices account deployment create `
+                    --name $OpenAIName `
+                    --resource-group $ResourceGroupName `
+                    --deployment-name $DeploymentName `
+                    --model-name $modelName `
+                    --model-format OpenAI `
+                    --sku-capacity 1 `
+                    --sku-name "Standard" `
+                    --output none
+                
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "✓ Sora model deployment created successfully" -ForegroundColor Green
+                } else {
+                    Write-Host "❌ Failed to deploy Sora model." -ForegroundColor Red
+                    Write-Host ""
+                    Write-Host "Please try deploying manually via Azure Portal:" -ForegroundColor Yellow
+                    Write-Host "1. Go to: https://portal.azure.com" -ForegroundColor White
+                    Write-Host "2. Navigate to your Azure OpenAI resource: $OpenAIName" -ForegroundColor White
+                    Write-Host "3. Go to 'Model deployments' → 'Create new deployment'" -ForegroundColor White
+                    Write-Host "4. Select a Sora model and name it: $DeploymentName" -ForegroundColor White
+                    Write-Host ""
+                    exit 1
+                }
+            }
+        } else {
+            Write-Host "⚠ No Sora models found in available models list." -ForegroundColor Yellow
+            Write-Host "Attempting deployment with standard parameters..." -ForegroundColor Yellow
+            Write-Host ""
+            
+            # Try standard model names as fallback
+            $modelNames = @("sora-turbo-2024-12-17", "sora-1.0-turbo", "sora")
+            $deployed = $false
+            
+            foreach ($modelName in $modelNames) {
+                Write-Host "Trying model: $modelName..." -ForegroundColor Cyan
+                az cognitiveservices account deployment create `
+                    --name $OpenAIName `
+                    --resource-group $ResourceGroupName `
+                    --deployment-name $DeploymentName `
+                    --model-name $modelName `
+                    --model-format OpenAI `
+                    --sku-capacity 1 `
+                    --sku-name "Standard" `
+                    --output none 2>$null
+                
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "✓ Successfully deployed: $modelName" -ForegroundColor Green
+                    $deployed = $true
+                    break
+                }
+            }
+            
+            if (-not $deployed) {
+                Write-Host ""
+                Write-Host "❌ Unable to automatically deploy Sora model." -ForegroundColor Red
+                Write-Host ""
+                Write-Host "This could mean:" -ForegroundColor Yellow
+                Write-Host "  1. Your subscription doesn't have Sora preview access" -ForegroundColor White
+                Write-Host "  2. Sora is not available in region: $Location" -ForegroundColor White
+                Write-Host "  3. The model name format has changed" -ForegroundColor White
+                Write-Host ""
+                Write-Host "Please deploy manually via Azure Portal and then re-run this script." -ForegroundColor Cyan
+                Write-Host ""
+                exit 1
+            }
+        }
     } else {
-        # Sora-2 failed, try Sora-1
-        Write-Host "⚠ Sora-2 not available. Trying Sora-1..." -ForegroundColor Yellow
+        Write-Host "⚠ Unable to list models. Trying direct deployment..." -ForegroundColor Yellow
+        
+        # Direct deployment attempt
         az cognitiveservices account deployment create `
             --name $OpenAIName `
             --resource-group $ResourceGroupName `
             --deployment-name $DeploymentName `
-            --model-name "sora-1" `
-            --model-version "1" `
+            --model-name "sora-turbo-2024-12-17" `
             --model-format OpenAI `
             --sku-capacity 1 `
             --sku-name "Standard" `
             --output none 2>$null
         
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "✓ Sora-1 model deployment created successfully" -ForegroundColor Green
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Deployment failed. Please create manually via Azure Portal." -ForegroundColor Red
+            Write-Host ""
+            exit 1
         } else {
-            # Both failed, try just "sora"
-            Write-Host "⚠ Sora-1 not available. Trying generic 'sora' model..." -ForegroundColor Yellow
-            az cognitiveservices account deployment create `
-                --name $OpenAIName `
-                --resource-group $ResourceGroupName `
-                --deployment-name $DeploymentName `
-                --model-name "sora" `
-                --model-version "1" `
-                --model-format OpenAI `
-                --sku-capacity 1 `
-                --sku-name "Standard" `
-                --output none
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "✓ Sora model deployment created successfully" -ForegroundColor Green
-            } else {
-                Write-Host "❌ Failed to deploy Sora model. Please check:" -ForegroundColor Red
-                Write-Host "   1. Your subscription has access to Sora preview" -ForegroundColor Yellow
-                Write-Host "   2. The region '$Location' supports Sora models" -ForegroundColor Yellow
-                Write-Host "   3. Your Azure OpenAI quota is sufficient" -ForegroundColor Yellow
-                Write-Host ""
-                Write-Host "Try running with a different region:" -ForegroundColor Cyan
-                Write-Host "   .\provision-sora-model.ps1 -Location 'eastus2'" -ForegroundColor White
-                Write-Host ""
-                exit 1
-            }
+            Write-Host "✓ Sora model deployment created" -ForegroundColor Green
         }
     }
 } else {

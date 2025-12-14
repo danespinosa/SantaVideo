@@ -102,9 +102,9 @@ public class SantaVideoGenerator
             var jsonContent = JsonSerializer.Serialize(requestBody);
             var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
 
-            var apiUrl = $"{_endpoint.TrimEnd('/')}/openai/deployments/{_deploymentName}/video-generation?api-version=2024-08-01-preview";
+            var apiUrl = _endpoint;
             
-            Console.WriteLine("⏳ Sending request to Azure AI Foundry Sora...");
+            Console.WriteLine("⏳ Sending request to Azure AI Foundry Sora... {0}", apiUrl);
             var response = await _httpClient.PostAsync(apiUrl, content);
             
             if (!response.IsSuccessStatusCode)
