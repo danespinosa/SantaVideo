@@ -92,8 +92,8 @@ public class SantaVideoGenerator
             
             // Add all form fields as strings (matching Python data dict)
             formData.Add(new StringContent(prompt), "prompt");
-            formData.Add(new StringContent("720"), "height");
-            formData.Add(new StringContent("1280"), "width");
+            formData.Add(new StringContent("480"), "height");
+            formData.Add(new StringContent("854"), "width");
             formData.Add(new StringContent("5"), "n_seconds");
             formData.Add(new StringContent("1"), "n_variants");
             formData.Add(new StringContent(_deploymentName), "model");
