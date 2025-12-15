@@ -7,22 +7,41 @@ class Program
 {
     static async Task Main(string[] args)
     {
-        Console.WriteLine("🎅 Santa Video Generator - Powered by Azure AI Foundry Sora");
-        Console.WriteLine("============================================================\n");
-
         var config = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
             .AddJsonFile("appsettings.json", optional: false)
             .Build();
 
-        var endpoint = config["AzureAI:Endpoint"];
-        var apiKey = config["AzureAI:ApiKey"];
-        var deploymentName = config["AzureAI:DeploymentName"];
+        var provider = config["Provider"] ?? "Azure";
+        
+        Console.WriteLine($"🎅 Santa Video Generator - Powered by {provider} Sora");
+        Console.WriteLine("============================================================\n");
 
-        if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(deploymentName))
+        string? endpoint, apiKey, modelOrDeployment;
+        
+        if (provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
         {
-            Console.WriteLine("❌ Configuration missing! Please run provision-sora-model.ps1 first.");
-            return;
+            endpoint = config["OpenAI:Endpoint"];
+            apiKey = config["OpenAI:ApiKey"];
+            modelOrDeployment = config["OpenAI:Model"];
+            
+            if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(modelOrDeployment))
+            {
+                Console.WriteLine("❌ OpenAI configuration missing! Please configure OpenAI section in appsettings.json");
+                return;
+            }
+        }
+        else // Azure
+        {
+            endpoint = config["AzureAI:Endpoint"];
+            apiKey = config["AzureAI:ApiKey"];
+            modelOrDeployment = config["AzureAI:DeploymentName"];
+            
+            if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(modelOrDeployment))
+            {
+                Console.WriteLine("❌ Azure configuration missing! Please run provision-sora-model.ps1 first.");
+                return;
+            }
         }
 
         string? imagePath = null;
@@ -42,7 +61,7 @@ class Program
             return;
         }
 
-        var videoGenerator = new SantaVideoGenerator(endpoint, apiKey, deploymentName);
+        var videoGenerator = new SantaVideoGenerator(endpoint, apiKey, modelOrDeployment, provider);
         await videoGenerator.GenerateSantaVideo(imagePath);
     }
 }
@@ -51,19 +70,180 @@ public class SantaVideoGenerator
 {
     private readonly string _endpoint;
     private readonly string _apiKey;
-    private readonly string _deploymentName;
+    private readonly string _modelOrDeployment;
+    private readonly string _provider;
     private readonly HttpClient _httpClient;
 
-    public SantaVideoGenerator(string endpoint, string apiKey, string deploymentName)
+    public SantaVideoGenerator(string endpoint, string apiKey, string modelOrDeployment, string provider)
     {
         _endpoint = endpoint;
         _apiKey = apiKey;
-        _deploymentName = deploymentName;
+        _modelOrDeployment = modelOrDeployment;
+        _provider = provider;
         _httpClient = new HttpClient();
-        _httpClient.DefaultRequestHeaders.Add("api-key", _apiKey);
+        
+        // Set authentication header based on provider
+        if (provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
+        {
+            _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_apiKey}");
+        }
+        else // Azure
+        {
+            _httpClient.DefaultRequestHeaders.Add("api-key", _apiKey);
+        }
     }
 
     public async Task GenerateSantaVideo(string imagePath)
+    {
+        if (_provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
+        {
+            await GenerateSantaVideo_OpenAI(imagePath);
+        }
+        else // Azure
+        {
+            await GenerateSantaVideo_Azure(imagePath);
+        }
+    }
+
+    private async Task GenerateSantaVideo_OpenAI(string imagePath)
+    {
+        try
+        {
+            Console.WriteLine($"📸 Loading image: {Path.GetFileName(imagePath)}");
+            
+            var imageBytes = await File.ReadAllBytesAsync(imagePath);
+            var fileName = Path.GetFileName(imagePath);
+            var imageExtension = Path.GetExtension(imagePath).TrimStart('.').ToLower();
+            var mimeType = imageExtension switch
+            {
+                "jpg" or "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                "webp" => "image/webp",
+                _ => "image/jpeg"
+            };
+
+            Console.WriteLine("\n🎬 Generating video with OpenAI Sora 2...");
+            Console.WriteLine("   Prompt: Santa Claus magically appears in the scene...\n");
+
+            var prompt = "Santa Claus magically appears in the Christmas scene, walks gracefully to the Christmas tree with a bag of presents, carefully places beautifully wrapped gifts underneath the tree, steps back to admire his work with a warm smile, waves goodbye, and disappears in a shower of festive sparkles and twinkling lights. The scene is warm, magical, and filled with holiday spirit.";
+
+            // OpenAI Sora 2 ALSO uses multipart/form-data (like Azure)
+            using var formData = new MultipartFormDataContent();
+            
+            // Add form fields
+            formData.Add(new StringContent(prompt), "prompt");
+            formData.Add(new StringContent(_modelOrDeployment), "model"); // "sora-2" or "sora-2-pro"
+            formData.Add(new StringContent("1280x720"), "resolution"); // "720p" or "1024p"
+            formData.Add(new StringContent("10"), "seconds"); // 4, 8, or 12
+            
+            // Add image file if provided
+            var imageContent = new ByteArrayContent(imageBytes);
+            imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mimeType);
+            formData.Add(imageContent, "input_reference", fileName);
+
+            var apiUrl = $"{_endpoint.TrimEnd('/')}/v1/videos";
+            
+            Console.WriteLine("⏳ Sending request to OpenAI Sora 2...{0}", apiUrl);
+            var response = await _httpClient.PostAsync(apiUrl, formData);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"❌ Error: {response.StatusCode}");
+                Console.WriteLine($"Details: {errorContent}");
+                return;
+            }
+
+            var responseJson = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"Response: {responseJson}");
+            
+            var result = JsonSerializer.Deserialize<JsonElement>(responseJson);
+
+            if (result.TryGetProperty("id", out var videoId))
+            {
+                Console.WriteLine($"✓ Video generation started! Video ID: {videoId.GetString()}");
+                await PollVideoStatus_OpenAI(videoId.GetString()!);
+            }
+            else
+            {
+                Console.WriteLine($"⚠ Unexpected response format: {responseJson}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Error: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+    }
+
+    private async Task PollVideoStatus_OpenAI(string videoId)
+    {
+        var statusUrl = $"{_endpoint.TrimEnd('/')}/v1/videos/{videoId}";
+        var maxAttempts = 120;
+        var attempt = 0;
+        string? status = null;
+
+        Console.WriteLine("\n⏳ Generating video (this may take a few minutes)...");
+
+        while (status != "completed" && status != "failed" && status != "cancelled" && attempt < maxAttempts)
+        {
+            await Task.Delay(5000);
+            attempt++;
+
+            var response = await _httpClient.GetAsync(statusUrl);
+            var responseJson = await response.Content.ReadAsStringAsync();
+            var statusResponse = JsonSerializer.Deserialize<JsonElement>(responseJson);
+
+            if (statusResponse.TryGetProperty("status", out var statusValue))
+            {
+                status = statusValue.GetString();
+                Console.Write($"\r   Status: {status} ({attempt * 5}s elapsed)");
+                
+                if (status == "completed")
+                {
+                    Console.WriteLine("\n✓ Video generation completed!");
+                    await DownloadVideo_OpenAI(videoId);
+                    return;
+                }
+                else if (status == "failed" || status == "cancelled")
+                {
+                    Console.WriteLine($"\n❌ Video generation {status}.");
+                    if (statusResponse.TryGetProperty("error", out var error))
+                    {
+                        Console.WriteLine($"Error: {error}");
+                    }
+                    return;
+                }
+            }
+        }
+
+        Console.WriteLine("\n⏰ Timeout waiting for video generation.");
+    }
+
+    private async Task DownloadVideo_OpenAI(string videoId)
+    {
+        try
+        {
+            var videoUrl = $"{_endpoint.TrimEnd('/')}/v1/videos/{videoId}/content";
+            
+            Console.WriteLine($"\n📥 Downloading video: {videoId}");
+            
+            var videoBytes = await _httpClient.GetByteArrayAsync(videoUrl);
+            var outputPath = Path.Combine(Directory.GetCurrentDirectory(), $"santa_video_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
+            
+            await File.WriteAllBytesAsync(outputPath, videoBytes);
+            
+            Console.WriteLine($"\n✅ SUCCESS! Video saved to: {outputPath}");
+            Console.WriteLine($"   File size: {videoBytes.Length / 1024 / 1024:F2} MB");
+            Console.WriteLine($"\n🎄 Your magical Santa video is ready!");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n❌ Error downloading video: {ex.Message}");
+        }
+    }
+
+    private async Task GenerateSantaVideo_Azure(string imagePath)
     {
         try
         {
@@ -96,7 +276,7 @@ public class SantaVideoGenerator
             formData.Add(new StringContent("854"), "width");
             formData.Add(new StringContent("5"), "n_seconds");
             formData.Add(new StringContent("1"), "n_variants");
-            formData.Add(new StringContent(_deploymentName), "model");
+            formData.Add(new StringContent("sora"), "model");
             
             // Add inpaint_items as JSON string (for image-to-video)
             // Configure which parts of the image stay consistent throughout the video
