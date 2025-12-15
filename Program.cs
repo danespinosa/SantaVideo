@@ -128,11 +128,11 @@ public class SantaVideoGenerator
                         right_fraction = 1.0,
                         bottom_fraction = 1.0
                     }
-                },
+                }
                 // Last frame (end of video) - return to original scene
-                new
+                , new
                 {
-                    frame_index = -1,
+                    frame_index = 5,
                     type = "image",
                     file_name = fileName,
                     crop_bounds = new
