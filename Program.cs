@@ -99,11 +99,23 @@ public class SantaVideoGenerator
             formData.Add(new StringContent(_deploymentName), "model");
             
             // Add inpaint_items as JSON string (for image-to-video)
-            // Two items: one for first frame (0) and one for last frame (-1)
-            // This ensures the video starts and ends with the same scene
+            // Configure which parts of the image stay consistent throughout the video
+            // 
+            // OPTION 1: Keep ENTIRE scene consistent (starts, middle, and ends same)
+            // Use crop_bounds with full frame (0.0 to 1.0) for first and last frame
+            // This constrains Sora to keep the background/tree consistent
+            //
+            // OPTION 2: Keep only BACKGROUND consistent (tree/room stays same, Santa can appear)
+            // Use crop_bounds to specify which region should stay unchanged
+            // Example: bottom_fraction = 0.7 means keep bottom 70% of image consistent
+            //
+            // OPTION 3: Keep specific AREA consistent (e.g., just the tree area)
+            // Use left/right/top/bottom fractions to define the exact region
+            //
+            // Currently using OPTION 1: Full frame consistency at start and end
             var inpaintItems = new[]
             {
-                // First frame (beginning of video)
+                // First frame (beginning of video) - entire scene
                 new
                 {
                     frame_index = 0,
@@ -111,13 +123,13 @@ public class SantaVideoGenerator
                     file_name = fileName,
                     crop_bounds = new
                     {
-                        left_fraction = 0.0,
-                        top_fraction = 0.0,
+                        left_fraction = 0.0,   // Keep entire width
+                        top_fraction = 0.0,    // Keep entire height
                         right_fraction = 1.0,
                         bottom_fraction = 1.0
                     }
                 },
-                // Last frame (end of video) - use -1 for last frame
+                // Last frame (end of video) - return to original scene
                 new
                 {
                     frame_index = -1,
@@ -131,6 +143,29 @@ public class SantaVideoGenerator
                         bottom_fraction = 1.0
                     }
                 }
+                
+                // ADVANCED: Uncomment to add middle frame constraints
+                // This keeps the background consistent throughout the ENTIRE video
+                // but allows foreground (Santa) to animate
+                
+                // Middle frame example (frame 50% through video)
+                // Constrains background/tree area only (bottom 60% of frame)
+                /*
+                ,
+                new
+                {
+                    frame_index = 50,  // Percentage or frame number
+                    type = "image",
+                    file_name = fileName,
+                    crop_bounds = new
+                    {
+                        left_fraction = 0.0,
+                        top_fraction = 0.4,    // Start at 40% from top (keep bottom 60%)
+                        right_fraction = 1.0,
+                        bottom_fraction = 1.0  // Keep tree/floor area consistent
+                    }
+                }
+                */
             };
             formData.Add(new StringContent(JsonSerializer.Serialize(inpaintItems)), "inpaint_items");
             
