@@ -85,7 +85,7 @@ public class SantaVideoGenerator
             Console.WriteLine("           to the Christmas tree, places beautifully wrapped gifts underneath,");
             Console.WriteLine("           steps back to admire the scene, then disappears in a festive sparkle.\n");
 
-            var prompt = "Use the uploaded image as the fixed background. Do not modify or replace any part of the scene. The image shows a cozy living room with a decorated Christmas tree in the corner, a red tree skirt, a toy car, and a diaper bin. Santa Claus, wearing a classic red suit with white trim and a fluffy natural white beard and hair, he gently places wrapped presents under the tree. The camera remains steady in a medium shot, and only Santa is animated. His movements are realistic and proportionate, with a cheerful expression. The background stays exactly as shown in the image, with no added elements or changes";
+            var prompt = "Use the uploaded image as the fixed background. Do not modify or replace any part of the scene. The image shows a cozy living room with a decorated Christmas tree in the corner, a red tree skirt, a toy car, and a diaper bin. Santa Claus, wearing a classic red suit with white trim and a natural white beard and hair, they should look like hair rather than cotton, and with a big belly, he gently places wrapped presents under the tree. The camera remains steady in a medium shot, and only Santa is animated. His movements are realistic and proportionate, with a cheerful expression. The background stays exactly as shown in the image, with no added elements or changes. The cammera doesn't move, zoom or focus in any other areas of the room.";
 
             // Build multipart/form-data request matching Python code exactly
             using var formData = new MultipartFormDataContent();
@@ -99,11 +99,28 @@ public class SantaVideoGenerator
             formData.Add(new StringContent(_deploymentName), "model");
             
             // Add inpaint_items as JSON string (for image-to-video)
+            // Two items: one for first frame (0) and one for last frame (-1)
+            // This ensures the video starts and ends with the same scene
             var inpaintItems = new[]
             {
+                // First frame (beginning of video)
                 new
                 {
                     frame_index = 0,
+                    type = "image",
+                    file_name = fileName,
+                    crop_bounds = new
+                    {
+                        left_fraction = 0.0,
+                        top_fraction = 0.0,
+                        right_fraction = 1.0,
+                        bottom_fraction = 1.0
+                    }
+                },
+                // Last frame (end of video) - use -1 for last frame
+                new
+                {
+                    frame_index = -1,
                     type = "image",
                     file_name = fileName,
                     crop_bounds = new
