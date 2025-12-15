@@ -265,8 +265,7 @@ public class SantaVideoGenerator
             Console.WriteLine("           to the Christmas tree, places beautifully wrapped gifts underneath,");
             Console.WriteLine("           steps back to admire the scene, then disappears in a festive sparkle.\n");
 
-            var prompt = "Use the uploaded image as the fixed background. Do not modify or replace any part of the scene. The image shows a cozy living room with a decorated Christmas tree in the corner, a red tree skirt, a toy car, and a diaper bin. Santa Claus, wearing a classic red suit with white trim and a natural white beard and hair, they should look like hair rather than cotton, and with a big belly, he gently places wrapped presents under the tree. The camera remains steady in a medium shot, and only Santa is animated. His movements are realistic and proportionate, with a cheerful expression. The background stays exactly as shown in the image, with no added elements or changes. The cammera doesn't move, zoom or focus in any other areas of the room.";
-
+            var prompt = "A cozy living room with a decorated Christmas tree and couch. Santa Claus, in a classic red suit, gently places wrapped presents under the tree. The background remains unchanged throughout the video.";
             // Build multipart/form-data request matching Python code exactly
             using var formData = new MultipartFormDataContent();
             
@@ -276,43 +275,13 @@ public class SantaVideoGenerator
             formData.Add(new StringContent("854"), "width");
             formData.Add(new StringContent("5"), "n_seconds");
             formData.Add(new StringContent("1"), "n_variants");
-            formData.Add(new StringContent("sora"), "model");
+            formData.Add(new StringContent(_modelOrDeployment), "model");
             
-            // Add inpaint_items as JSON string (for image-to-video)
-            // Configure which parts of the image stay consistent throughout the video
-            // 
-            // OPTION 1: Keep ENTIRE scene consistent (starts, middle, and ends same)
-            // Use crop_bounds with full frame (0.0 to 1.0) for first and last frame
-            // This constrains Sora to keep the background/tree consistent
-            //
-            // OPTION 2: Keep only BACKGROUND consistent (tree/room stays same, Santa can appear)
-            // Use crop_bounds to specify which region should stay unchanged
-            // Example: bottom_fraction = 0.7 means keep bottom 70% of image consistent
-            //
-            // OPTION 3: Keep specific AREA consistent (e.g., just the tree area)
-            // Use left/right/top/bottom fractions to define the exact region
-            //
-            // Currently using OPTION 1: Full frame consistency at start and end
             var inpaintItems = new[]
             {
-                // First frame (beginning of video) - entire scene
                 new
                 {
                     frame_index = 0,
-                    type = "image",
-                    file_name = fileName,
-                    crop_bounds = new
-                    {
-                        left_fraction = 0.0,   // Keep entire width
-                        top_fraction = 0.0,    // Keep entire height
-                        right_fraction = 1.0,
-                        bottom_fraction = 1.0
-                    }
-                }
-                // Last frame (end of video) - return to original scene
-                , new
-                {
-                    frame_index = 5,
                     type = "image",
                     file_name = fileName,
                     crop_bounds = new
@@ -321,32 +290,11 @@ public class SantaVideoGenerator
                         top_fraction = 0.0,
                         right_fraction = 1.0,
                         bottom_fraction = 1.0
-                    }
+                    },
+                    prompt = "Keep the living room background unchanged while only Santa is animated"
                 }
-                
-                // ADVANCED: Uncomment to add middle frame constraints
-                // This keeps the background consistent throughout the ENTIRE video
-                // but allows foreground (Santa) to animate
-                
-                // Middle frame example (frame 50% through video)
-                // Constrains background/tree area only (bottom 60% of frame)
-                /*
-                ,
-                new
-                {
-                    frame_index = 50,  // Percentage or frame number
-                    type = "image",
-                    file_name = fileName,
-                    crop_bounds = new
-                    {
-                        left_fraction = 0.0,
-                        top_fraction = 0.4,    // Start at 40% from top (keep bottom 60%)
-                        right_fraction = 1.0,
-                        bottom_fraction = 1.0  // Keep tree/floor area consistent
-                    }
-                }
-                */
             };
+
             formData.Add(new StringContent(JsonSerializer.Serialize(inpaintItems)), "inpaint_items");
             
             // Add image file (matching Python files format)
