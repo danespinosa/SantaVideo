@@ -125,7 +125,7 @@ public class SantaVideoGenerator
             Console.WriteLine("\n🎬 Generating video with OpenAI Sora 2...");
             Console.WriteLine("   Prompt: Santa Claus magically appears in the scene...\n");
 
-            var prompt = "Santa Claus magically appears in the Christmas scene, walks gracefully to the Christmas tree with a bag of presents, carefully places beautifully wrapped gifts underneath the tree, steps back to admire his work with a warm smile, waves goodbye, and disappears in a shower of festive sparkles and twinkling lights. The scene is warm, magical, and filled with holiday spirit.";
+            var prompt = "Can you add a Santa placing gifts under the tree on the image, the picture should be the background for all frames, santa's hair should look natural rather than a wig as well as his beard";
 
             // OpenAI Sora 2 ALSO uses multipart/form-data (like Azure)
             using var formData = new MultipartFormDataContent();
@@ -133,8 +133,8 @@ public class SantaVideoGenerator
             // Add form fields
             formData.Add(new StringContent(prompt), "prompt");
             formData.Add(new StringContent(_modelOrDeployment), "model"); // "sora-2" or "sora-2-pro"
-            formData.Add(new StringContent("1280x720"), "resolution"); // "720p" or "1024p"
-            formData.Add(new StringContent("10"), "seconds"); // 4, 8, or 12
+            formData.Add(new StringContent("720x1280"), "size"); // "720p" or "1024p"
+            formData.Add(new StringContent("4"), "seconds"); // 4, 8, or 12
             
             // Add image file if provided
             var imageContent = new ByteArrayContent(imageBytes);
